@@ -20,67 +20,63 @@ const (
 	kTimeFormat     = "02.01.2006 15:04"
 )
 
-type WeatherInfo struct {
+//
+// WeatherSample
+//
+
+type WeatherSample struct {
 	temperature float32
 	windSpeed   float32
 }
 
-func (w WeatherInfo) String() string {
+func (w WeatherSample) String() string {
 	return fmt.Sprintf("{T:%.1f, W:%.1f}", w.temperature, w.windSpeed)
 }
 
-type AvgWeatherInfo struct {
-	yearAvgWeather map[int]*YearAvgWeatherInfo
+//
+// HourAvgWeather
+//
+
+type HourAvgWeather struct {
+	temperatureValuesSum      float64
+	temperatureValuesQuantity int64
+	windValuesSum             float64
+	windValuesQuantity        int64
 }
 
-func NewAvgWeatherInfo() *AvgWeatherInfo {
-	return &AvgWeatherInfo{yearAvgWeather: make(map[int]*YearAvgWeatherInfo)}
+func (h *HourAvgWeather) AddWeatherData(weather WeatherSample) {
+	h.temperatureValuesSum += float64(weather.temperature)
+	h.temperatureValuesQuantity++
+
+	h.windValuesSum += float64(weather.windSpeed)
+	h.windValuesQuantity++
 }
 
-func (a *AvgWeatherInfo) String() string {
-	years := make([]int, 0, len(a.yearAvgWeather))
-	for year, _ := range a.yearAvgWeather {
-		years = append(years, year)
+func (h *HourAvgWeather) AvgWeather() WeatherSample {
+	return WeatherSample{
+		temperature: float32(h.temperatureValuesSum / float64(h.temperatureValuesQuantity)),
+		windSpeed:   float32(h.windValuesSum / float64(h.windValuesQuantity)),
 	}
-	sort.Ints(years)
-	var comps []string
-	for _, year := range years {
-		comps = append(comps, fmt.Sprintf("%v: %v", year, a.yearAvgWeather[year]))
-	}
-	return fmt.Sprintf("{%v}", strings.Join(comps, "\n"))
 }
 
-type YearAvgWeatherInfo struct {
-	monthAvgWeather map[int]*MonthAvgWeatherInfo
+func (h *HourAvgWeather) String() string {
+	avgWeather := h.AvgWeather()
+	return fmt.Sprintf("%v", avgWeather)
 }
 
-func (y *YearAvgWeatherInfo) String() string {
-	months := make([]int, 0, len(y.monthAvgWeather))
-	for month, _ := range y.monthAvgWeather {
-		months = append(months, month)
-	}
-	sort.Ints(months)
-	var comps []string
-	for _, month := range months {
-		monthString := time.Month(month).String()[:3]
-		comps = append(comps, fmt.Sprintf("%v: %v", monthString, y.monthAvgWeather[month]))
-	}
-	return fmt.Sprintf("{%v}", strings.Join(comps, "\n"))
+//
+// MonthAvgWeather
+//
+
+type MonthAvgWeather struct {
+	hourAvgWeather map[int]*HourAvgWeather
 }
 
-func NewYearAvgWeatherInfo() *YearAvgWeatherInfo {
-	return &YearAvgWeatherInfo{monthAvgWeather: make(map[int]*MonthAvgWeatherInfo)}
+func NewMonthAvgWeather() *MonthAvgWeather {
+	return &MonthAvgWeather{hourAvgWeather: make(map[int]*HourAvgWeather)}
 }
 
-type MonthAvgWeatherInfo struct {
-	hourAvgWeather map[int]*HourAvgWeatherInfo
-}
-
-func NewMonthAvgWeatherInfo() *MonthAvgWeatherInfo {
-	return &MonthAvgWeatherInfo{hourAvgWeather: make(map[int]*HourAvgWeatherInfo)}
-}
-
-func (m *MonthAvgWeatherInfo) String() string {
+func (m *MonthAvgWeather) String() string {
 	hours := make([]int, 0, len(m.hourAvgWeather))
 	for hour, _ := range m.hourAvgWeather {
 		hours = append(hours, hour)
@@ -93,24 +89,98 @@ func (m *MonthAvgWeatherInfo) String() string {
 	return fmt.Sprintf("{%v}", strings.Join(comps, "\n"))
 }
 
-type HourAvgWeatherInfo struct {
-	temperatureValuesSum      float64
-	temperatureValuesQuantity int64
-	windValuesSum             float64
-	windValuesQuantity        int64
+func (m *MonthAvgWeather) HourAvgWeatherForTime(time time.Time) *HourAvgWeather {
+	var hourWeather *HourAvgWeather
+	hourWeather, ok := m.hourAvgWeather[time.Hour()]
+	if !ok {
+		hourWeather = new(HourAvgWeather)
+		m.hourAvgWeather[time.Hour()] = hourWeather
+	}
+	return hourWeather
 }
 
-func (h *HourAvgWeatherInfo) AvgWeather() WeatherInfo {
-	return WeatherInfo{
-		temperature: float32(h.temperatureValuesSum / float64(h.temperatureValuesQuantity)),
-		windSpeed:   float32(h.windValuesSum / float64(h.windValuesQuantity)),
+//
+// YearAvgWeather
+//
+
+type YearAvgWeather struct {
+	monthAvgWeather map[int]*MonthAvgWeather
+}
+
+func NewYearAvgWeather() *YearAvgWeather {
+	return &YearAvgWeather{monthAvgWeather: make(map[int]*MonthAvgWeather)}
+}
+
+func (y *YearAvgWeather) String() string {
+	months := make([]int, 0, len(y.monthAvgWeather))
+	for month, _ := range y.monthAvgWeather {
+		months = append(months, month)
+	}
+	sort.Ints(months)
+	var comps []string
+	for _, month := range months {
+		monthString := time.Month(month).String()[:3]
+		comps = append(comps, fmt.Sprintf("%v:\n%v", monthString, y.monthAvgWeather[month]))
+	}
+	return fmt.Sprintf("{%v}", strings.Join(comps, "\n"))
+}
+
+func (y *YearAvgWeather) MonthAvgWeatherForTime(time time.Time) *MonthAvgWeather {
+	var monthWeather *MonthAvgWeather
+	monthWeather, ok := y.monthAvgWeather[int(time.Month())]
+	if !ok {
+		monthWeather = NewMonthAvgWeather()
+		y.monthAvgWeather[int(time.Month())] = monthWeather
+	}
+	return monthWeather
+}
+
+//
+// AvgWeather
+//
+
+type AvgWeather struct {
+	yearAvgWeather     map[int]*YearAvgWeather
+	allYearsAvgWeather *YearAvgWeather
+}
+
+func NewAvgWeather() *AvgWeather {
+	return &AvgWeather{
+		yearAvgWeather:     make(map[int]*YearAvgWeather),
+		allYearsAvgWeather: NewYearAvgWeather(),
 	}
 }
 
-func (h *HourAvgWeatherInfo) String() string {
-	avgWeather := h.AvgWeather()
-	return fmt.Sprintf("%v", avgWeather)
+func (a *AvgWeather) String() string {
+	years := make([]int, 0, len(a.yearAvgWeather))
+	for year, _ := range a.yearAvgWeather {
+		years = append(years, year)
+	}
+	sort.Ints(years)
+	var comps []string
+	for _, year := range years {
+		comps = append(comps, fmt.Sprintf("%v:\n%v\n", year, a.yearAvgWeather[year]))
+	}
+	var allYearsString string = ""
+	if len(years) != 0 {
+		allYearsString = fmt.Sprintf("\n%v-%v:\n%v", years[0], years[len(years)-1], a.allYearsAvgWeather)
+	}
+	return fmt.Sprintf("{%v%v}\n", strings.Join(comps, "\n"), allYearsString)
 }
+
+func (a *AvgWeather) YearAvgWeatherForTime(time time.Time) *YearAvgWeather {
+	var yearWeather *YearAvgWeather
+	yearWeather, ok := a.yearAvgWeather[time.Year()]
+	if !ok {
+		yearWeather = NewYearAvgWeather()
+		a.yearAvgWeather[time.Year()] = yearWeather
+	}
+	return yearWeather
+}
+
+//
+// Utils
+//
 
 func appName() string {
 	return path.Base(os.Args[0])
@@ -125,18 +195,8 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\n")
 }
 
-func main() {
-
-	flag.Parse()
-
-	if flag.NArg() < 1 {
-		usage()
-		return
-	}
-
-	filePaths := flag.Args()
-
-	weatherInfos := make(map[int64]WeatherInfo)
+func parceCsvFiles(filePaths []string) map[int64]WeatherSample {
+	weatherSamples := make(map[int64]WeatherSample)
 
 	for _, filePath := range filePaths {
 
@@ -189,77 +249,72 @@ func main() {
 			dateTimeString := line[kTimeEntryIndex]
 			time, err := time.Parse(kTimeFormat, dateTimeString)
 			if err != nil {
-				fmt.Printf("%v: can't parse date at line %d\n", filePath, index)
+				fmt.Printf("%v: can't parse date at entry #%d\n", filePath, index)
 				continue
 			}
 			dateTime := time.Unix()
 
 			if temperatureEntryIndex >= len(line) {
-				fmt.Printf("%v: ill-formed line %d\n", filePath, index)
+				fmt.Printf("%v: ill-formed entry #%d\n", filePath, index)
 				continue
 			}
 
 			temperatureString := line[temperatureEntryIndex]
 			temperature, err := strconv.ParseFloat(temperatureString, 32)
 			if err != nil {
-				fmt.Printf("%v: can't parse temperature at line %d\n", filePath, index)
+				fmt.Printf("%v: can't parse temperature at entry #%d\n", filePath, index)
 				continue
 			}
 
 			if windEntryIndex >= len(line) {
-				fmt.Printf("%v: ill-formed line %d\n", filePath, index)
+				fmt.Printf("%v: ill-formed entry #%d\n", filePath, index)
 				continue
 			}
 
 			windString := line[windEntryIndex]
 			wind, err := strconv.ParseFloat(windString, 32)
 			if err != nil {
-				fmt.Printf("%v: can't parse wind at line %d\n", filePath, index)
+				fmt.Printf("%v: can't parse wind at entry #%d\n", filePath, index)
 				continue
 			}
 
-			var weatherInfo WeatherInfo
+			var weather WeatherSample
 
-			weatherInfo.temperature = float32(temperature)
-			weatherInfo.windSpeed = float32(wind)
+			weather.temperature = float32(temperature)
+			weather.windSpeed = float32(wind)
 
-			weatherInfos[dateTime] = weatherInfo
+			weatherSamples[dateTime] = weather
 		}
 	}
 
-	fmt.Println(weatherInfos)
+	return weatherSamples
+}
 
-	avgWeather := NewAvgWeatherInfo()
+func main() {
 
-	for dateTime, weatherInfo := range weatherInfos {
+	flag.Parse()
+
+	if flag.NArg() < 1 {
+		usage()
+		return
+	}
+
+	filePaths := flag.Args()
+
+	weatherSamples := parceCsvFiles(filePaths)
+
+	//fmt.Println(weatherSamples)
+
+	avgWeather := NewAvgWeather()
+
+	for dateTime, weather := range weatherSamples {
 		time := time.Unix(dateTime, 0).UTC()
 
-		var yearInfo *YearAvgWeatherInfo
-		yearInfo, ok := avgWeather.yearAvgWeather[time.Year()]
-		if !ok {
-			yearInfo = NewYearAvgWeatherInfo()
-			avgWeather.yearAvgWeather[time.Year()] = yearInfo
-		}
+		hourInfo := avgWeather.YearAvgWeatherForTime(time).MonthAvgWeatherForTime(time).HourAvgWeatherForTime(time)
+		hourInfo.AddWeatherData(weather)
 
-		var monthInfo *MonthAvgWeatherInfo
-		monthInfo, ok = yearInfo.monthAvgWeather[int(time.Month())]
-		if !ok {
-			monthInfo = NewMonthAvgWeatherInfo()
-			yearInfo.monthAvgWeather[int(time.Month())] = monthInfo
-		}
-
-		var hourInfo *HourAvgWeatherInfo
-		hourInfo, ok = monthInfo.hourAvgWeather[time.Hour()]
-		if !ok {
-			hourInfo = new(HourAvgWeatherInfo)
-			monthInfo.hourAvgWeather[time.Hour()] = hourInfo
-		}
-
-		hourInfo.temperatureValuesSum += float64(weatherInfo.temperature)
-		hourInfo.temperatureValuesQuantity++
-
-		hourInfo.windValuesSum += float64(weatherInfo.windSpeed)
-		hourInfo.windValuesQuantity++
+		allYearsHourInfo := avgWeather.allYearsAvgWeather.MonthAvgWeatherForTime(time).HourAvgWeatherForTime(time)
+		allYearsHourInfo.AddWeatherData(weather)
 	}
 
 	fmt.Println(avgWeather)
